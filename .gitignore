@@ -23,8 +23,13 @@
 # misc
 .DS_Store
 *.pem
+*.key
+*service-account*.json
+*credentials*.json
+application_default_credentials.json
 
 # debug
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -32,6 +37,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+
+# local cloud configuration
+.config/
+.gcloud/
+.aws/
 
 # vercel
 .vercel
