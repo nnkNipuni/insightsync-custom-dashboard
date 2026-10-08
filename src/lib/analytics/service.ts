@@ -4,6 +4,7 @@ import {
   getChannelComparisonTrend,
   getChannelEarliestGrowthDate,
   getChannelGrowthTrend,
+  getChannelSnapshotGrowth,
 } from "./channelGrowthRepository";
 import {
   getChannelLatestRecords,
@@ -428,16 +429,12 @@ function normalizeComparisonChannels(
   records: ChannelLatestRecord[],
 ): string[] {
   const validChannelIds = new Set(records.map((record) => record.channelId));
-  const requestedValidChannels = (requestedChannels ?? [])
+  const requestedValidChannels = (requestedChannels ?? records.slice(0, 2).map((record) => record.channelId))
     .filter((channelId) => validChannelIds.has(channelId))
     .filter((channelId, index, list) => list.indexOf(channelId) === index)
     .slice(0, 5);
 
-  if (requestedValidChannels.length >= 2) {
-    return requestedValidChannels;
-  }
-
-  return records.slice(0, 2).map((record) => record.channelId);
+  return requestedValidChannels;
 }
 
 function getChannelComparisonNotices(
@@ -534,6 +531,7 @@ export async function getDashboardData(
 
   const [
     growth,
+    snapshotGrowth,
     channelComparison,
     contentRankings,
     contentSummary,
@@ -546,12 +544,19 @@ export async function getDashboardData(
       startDate: resolvedFilters.startDate,
       endDate: resolvedFilters.endDate,
     }),
-    getChannelComparisonTrend({
-      channelIds: comparisonChannelIds,
-      channelTitles,
+    getChannelSnapshotGrowth({
+      channelId: resolvedFilters.channel,
       startDate: resolvedFilters.startDate,
       endDate: resolvedFilters.endDate,
     }),
+    comparisonChannelIds.length >= 2
+      ? getChannelComparisonTrend({
+          channelIds: comparisonChannelIds,
+          channelTitles,
+          startDate: resolvedFilters.startDate,
+          endDate: resolvedFilters.endDate,
+        })
+      : Promise.resolve([]),
     getContentRankings({
       channelId: resolvedFilters.channel,
       startDate: resolvedFilters.startDate,
@@ -586,6 +591,7 @@ export async function getDashboardData(
     campaigns,
     kpis: getChannelLatestKpis(selectedChannel),
     growth,
+    snapshotGrowth,
     channelPeriodSummary: getChannelPeriodSummary({
       channel: selectedChannel,
       points: growth,

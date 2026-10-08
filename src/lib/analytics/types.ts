@@ -134,6 +134,15 @@ export type ChannelComparisonSeries = {
   points: TimeSeriesPoint[];
 };
 
+export type ChannelSnapshotGrowthPoint = {
+  date: string;
+  previousSnapshotDate: string | null;
+  intervalDays: number | null;
+  viewsGained: number;
+  subscribersGained: number;
+  uploadsAdded: number;
+};
+
 export type DashboardData = {
   filters: DashboardFilters;
   notice?: DashboardNotice;
@@ -143,6 +152,7 @@ export type DashboardData = {
   campaigns: SelectOption[];
   kpis: KpiMetric[];
   growth: TimeSeriesPoint[];
+  snapshotGrowth: ChannelSnapshotGrowthPoint[];
   channelPeriodSummary: ChannelPeriodSummary | null;
   channelComparison: ChannelComparisonSeries[];
   channelComparisonNotices: string[];

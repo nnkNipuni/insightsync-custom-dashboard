@@ -6,7 +6,11 @@ import {
 } from "@google-cloud/bigquery";
 
 import { analyticsConfig } from "./config";
-import type { ChannelComparisonSeries, TimeSeriesPoint } from "./types";
+import type {
+  ChannelComparisonSeries,
+  ChannelSnapshotGrowthPoint,
+  TimeSeriesPoint,
+} from "./types";
 
 type ChannelGrowthRow = {
   ingestion_date: BigQueryDate | string;
@@ -21,6 +25,15 @@ type ChannelAvailabilityRow = {
 
 type ChannelComparisonRow = ChannelGrowthRow & {
   channel_id: string;
+};
+
+type ChannelSnapshotGrowthRow = {
+  ingestion_date: BigQueryDate | string;
+  previous_snapshot_date: BigQueryDate | string | null;
+  interval_days: number | string | null;
+  views_added_since_last_snapshot: number | string | null;
+  subscribers_added_since_last_snapshot: number | string | null;
+  uploads_added_since_last_snapshot: number | string | null;
 };
 
 const bigquery = new BigQuery({
@@ -71,6 +84,42 @@ export async function getChannelEarliestGrowthDate(
   }
 
   return formatDate(row.earliest_ingestion_date);
+}
+
+export async function getChannelSnapshotGrowth({
+  channelId,
+  endDate,
+  startDate,
+}: {
+  channelId: string;
+  endDate: string;
+  startDate: string;
+}): Promise<ChannelSnapshotGrowthPoint[]> {
+  const isAllChannels = channelId === "all";
+  const query = isAllChannels
+    ? allChannelsSnapshotGrowthQuery
+    : singleChannelSnapshotGrowthQuery;
+  const params = isAllChannels
+    ? { startDate, endDate }
+    : { startDate, endDate, channelId };
+
+  const [rows] = await bigquery.query({
+    query,
+    params,
+    location: analyticsConfig.location,
+  });
+
+  return (rows as ChannelSnapshotGrowthRow[]).map((row) => ({
+    date: formatDate(row.ingestion_date),
+    previousSnapshotDate: row.previous_snapshot_date
+      ? formatDate(row.previous_snapshot_date)
+      : null,
+    intervalDays:
+      row.interval_days === null ? null : Number(row.interval_days),
+    viewsGained: toNumber(row.views_added_since_last_snapshot),
+    subscribersGained: toNumber(row.subscribers_added_since_last_snapshot),
+    uploadsAdded: toNumber(row.uploads_added_since_last_snapshot),
+  }));
 }
 
 export async function getChannelComparisonTrend({
@@ -145,6 +194,81 @@ const singleChannelTrendQuery = `
   WHERE ingestion_date >= DATE(@startDate)
     AND ingestion_date <= DATE(@endDate)
     AND channel_id = @channelId
+  ORDER BY ingestion_date
+`;
+
+const allChannelsSnapshotGrowthQuery = `
+  WITH per_channel_growth AS (
+    SELECT
+      channel_id,
+      ingestion_date,
+      LAG(ingestion_date) OVER (
+        PARTITION BY channel_id
+        ORDER BY ingestion_date
+      ) AS previous_snapshot_date,
+      views_added_since_last_snapshot,
+      subscribers_added_since_last_snapshot,
+      uploads_added_since_last_snapshot
+    FROM \`${analyticsConfig.projectId}.${analyticsConfig.youtubeRawDataset}.${analyticsConfig.channelDailyGrowthView}\`
+  ),
+  aggregated_growth AS (
+    SELECT
+      ingestion_date,
+      SUM(views_added_since_last_snapshot) AS views_added_since_last_snapshot,
+      SUM(subscribers_added_since_last_snapshot) AS subscribers_added_since_last_snapshot,
+      SUM(uploads_added_since_last_snapshot) AS uploads_added_since_last_snapshot
+    FROM per_channel_growth
+    WHERE previous_snapshot_date IS NOT NULL
+    GROUP BY ingestion_date
+  ),
+  aggregate_with_previous AS (
+    SELECT
+      ingestion_date,
+      LAG(ingestion_date) OVER (ORDER BY ingestion_date) AS previous_snapshot_date,
+      views_added_since_last_snapshot,
+      subscribers_added_since_last_snapshot,
+      uploads_added_since_last_snapshot
+    FROM aggregated_growth
+  )
+  SELECT
+    ingestion_date,
+    previous_snapshot_date,
+    DATE_DIFF(ingestion_date, previous_snapshot_date, DAY) AS interval_days,
+    views_added_since_last_snapshot,
+    subscribers_added_since_last_snapshot,
+    uploads_added_since_last_snapshot
+  FROM aggregate_with_previous
+  WHERE ingestion_date >= DATE(@startDate)
+    AND ingestion_date <= DATE(@endDate)
+    AND previous_snapshot_date IS NOT NULL
+  ORDER BY ingestion_date
+`;
+
+const singleChannelSnapshotGrowthQuery = `
+  WITH growth_with_previous AS (
+    SELECT
+      ingestion_date,
+      LAG(ingestion_date) OVER (
+        PARTITION BY channel_id
+        ORDER BY ingestion_date
+      ) AS previous_snapshot_date,
+      views_added_since_last_snapshot,
+      subscribers_added_since_last_snapshot,
+      uploads_added_since_last_snapshot
+    FROM \`${analyticsConfig.projectId}.${analyticsConfig.youtubeRawDataset}.${analyticsConfig.channelDailyGrowthView}\`
+    WHERE channel_id = @channelId
+  )
+  SELECT
+    ingestion_date,
+    previous_snapshot_date,
+    DATE_DIFF(ingestion_date, previous_snapshot_date, DAY) AS interval_days,
+    views_added_since_last_snapshot,
+    subscribers_added_since_last_snapshot,
+    uploads_added_since_last_snapshot
+  FROM growth_with_previous
+  WHERE ingestion_date >= DATE(@startDate)
+    AND ingestion_date <= DATE(@endDate)
+    AND previous_snapshot_date IS NOT NULL
   ORDER BY ingestion_date
 `;
 
