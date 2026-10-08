@@ -311,10 +311,7 @@ export function InsightDashboard({ initialData }: InsightDashboardProps) {
             {data.notice && <Notice message={data.notice.message} />}
 
             {activeModule === "overview" && (
-              <OverviewView
-                data={data}
-                onProgrammeSelect={selectProgramme}
-              />
+              <OverviewView data={data} />
             )}
 
             {activeModule === "youtube-channel" && (
@@ -630,34 +627,42 @@ function RemoveFilterButton({
 
 function OverviewView({
   data,
-  onProgrammeSelect,
 }: {
   data: DashboardData;
-  onProgrammeSelect: (programme: string) => void;
 }) {
+  const isAllChannels = data.filters.channel === "all";
+  const channelTrendDescription = isAllChannels
+    ? "Tracks the combined cumulative total view count of the available YouTube channels over the selected period based on daily snapshots."
+    : "Tracks how the selected channel's cumulative total view count changes over time based on available daily snapshots.";
+
   return (
     <div className="grid gap-5">
-      <KpiGrid metrics={data.kpis} />
-      <section className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
-        <Panel title="Overall Performance Trend">
+      <section className="grid gap-4">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-950">
+            Latest Channel Snapshot
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-500">
+            Latest available channel totals. The selected date range applies to
+            trend and period-change metrics.
+          </p>
+        </div>
+        <KpiGrid metrics={data.kpis} />
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
+        <Panel
+          title="Channel Total Views Trend"
+          description={channelTrendDescription}
+        >
           <LineChart points={data.growth} />
         </Panel>
-        <Panel title="Platform Summary">
-          <PlatformSummaryGrid items={data.platformSummary} />
+        <Panel
+          title="Change During Selected Period"
+          description="Uses the first and last available channel snapshots in the selected date range."
+        >
+          <ChannelPeriodSummaryPanel summary={data.channelPeriodSummary} />
         </Panel>
-      </section>
-      <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <Panel title="Top-Performing Content">
-          <RankingTable rows={data.rankings} onProgrammeSelect={onProgrammeSelect} />
-        </Panel>
-        <div className="grid gap-5">
-          <Panel title="Programme Highlights">
-            <Highlights items={data.programmeHighlights} />
-          </Panel>
-          <Panel title="News Highlights">
-            <Highlights items={data.newsHighlights} />
-          </Panel>
-        </div>
       </section>
     </div>
   );
@@ -692,14 +697,20 @@ function YoutubeChannelView({ data }: { data: DashboardData }) {
 
 function YoutubeContentView({ data }: { data: DashboardData }) {
   return (
-    <section className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
-      <Panel title="Top YouTube Content">
-        <ContentRankingTable rows={data.contentRankings} />
-      </Panel>
-      <Panel title="Content Summary">
-        <ContentSummaryPanel summary={data.contentSummary} />
-      </Panel>
-    </section>
+    <div className="grid gap-5">
+      <ContentFreshnessNote timestamp={data.contentFreshness} />
+      <section className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
+        <Panel
+          title="Top Videos by Latest Captured Views"
+          description="Ranks videos using the most recent statistics available in the content dataset. Values may not represent current YouTube totals."
+        >
+          <ContentRankingTable rows={data.contentRankings} />
+        </Panel>
+        <Panel title="Content Summary">
+          <ContentSummaryPanel summary={data.contentSummary} />
+        </Panel>
+      </section>
+    </div>
   );
 }
 
@@ -748,29 +759,29 @@ function ContentView({
 function ContentSummaryPanel({ summary }: { summary: ContentSummary }) {
   const metrics = [
     {
-      label: "Videos published",
+      label: "Videos Published",
       value: fullNumberFormatter.format(summary.videosPublished),
       note: "Published in selected range",
     },
     {
-      label: "Combined latest views",
+      label: "Combined Captured Views",
       value: fullNumberFormatter.format(summary.combinedViews),
-      note: "Latest totals for selected videos",
+      note: "Latest captured statistics for selected videos",
     },
     {
-      label: "Likes",
+      label: "Captured Likes",
       value: fullNumberFormatter.format(summary.likes),
-      note: "Latest totals for selected videos",
+      note: "Latest captured statistics for selected videos",
     },
     {
-      label: "Comments",
+      label: "Captured Comments",
       value: fullNumberFormatter.format(summary.comments),
-      note: "Latest totals for selected videos",
+      note: "Latest captured statistics for selected videos",
     },
     {
-      label: "Engagement rate",
+      label: "Captured Engagement Rate",
       value: formatPercent(summary.engagementRate),
-      note: "Likes plus comments over views",
+      note: "Captured likes plus comments over captured views",
     },
   ];
 
@@ -786,6 +797,18 @@ function ContentSummaryPanel({ summary }: { summary: ContentSummary }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function ContentFreshnessNote({ timestamp }: { timestamp: string | null }) {
+  if (!timestamp) {
+    return null;
+  }
+
+  return (
+    <p className="text-sm font-medium text-slate-500">
+      Content statistics captured through: {formatTimestamp(timestamp)}
+    </p>
   );
 }
 
@@ -1017,16 +1040,25 @@ function KpiCard({ metric }: { metric: KpiMetric }) {
 function Panel({
   action,
   children,
+  description,
   title,
 }: {
   action?: ReactNode;
   children: ReactNode;
+  description?: string;
   title: string;
 }) {
   return (
     <article className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
+        <div>
+          <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
+          {description && (
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+              {description}
+            </p>
+          )}
+        </div>
         {action}
       </div>
       {children}
@@ -1453,6 +1485,26 @@ function formatLongDate(date: string): string {
   return new Intl.DateTimeFormat("en", {
     day: "numeric",
     month: "short",
+    year: "numeric",
+  }).format(parsedDate);
+}
+
+function formatTimestamp(timestamp: string): string {
+  const normalizedTimestamp = timestamp.includes("T")
+    ? timestamp
+    : `${timestamp.replace(" ", "T")}Z`;
+  const parsedDate = new Date(normalizedTimestamp);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return timestamp;
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    timeZoneName: "short",
     year: "numeric",
   }).format(parsedDate);
 }

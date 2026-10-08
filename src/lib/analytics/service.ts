@@ -11,6 +11,7 @@ import {
 import {
   getContentChannels,
   getContentEarliestPublishedDate,
+  getContentFreshness,
   getContentRankings,
   getContentSummary,
 } from "./contentRepository";
@@ -488,7 +489,7 @@ export async function getDashboardData(
     }
   }
 
-  const [growth, contentRankings, contentSummary] = await Promise.all([
+  const [growth, contentRankings, contentSummary, contentFreshness] = await Promise.all([
     getChannelGrowthTrend({
       channelId: resolvedFilters.channel,
       startDate: resolvedFilters.startDate,
@@ -504,6 +505,7 @@ export async function getDashboardData(
       startDate: resolvedFilters.startDate,
       endDate: resolvedFilters.endDate,
     }),
+    getContentFreshness(),
   ]);
 
   return {
@@ -523,6 +525,7 @@ export async function getDashboardData(
     rankings,
     contentRankings,
     contentSummary,
+    contentFreshness,
     comparisons,
     platformSummary,
     metaAdsOverview,

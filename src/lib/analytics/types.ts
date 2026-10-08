@@ -121,6 +121,7 @@ export type DashboardData = {
   rankings: RankingRow[];
   contentRankings: ContentRankingRow[];
   contentSummary: ContentSummary;
+  contentFreshness: string | null;
   comparisons: ProgrammeComparison[];
   platformSummary: PlatformSummary[];
   metaAdsOverview: PlatformSummary[];
