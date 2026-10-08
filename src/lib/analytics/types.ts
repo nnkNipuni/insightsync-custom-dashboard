@@ -57,6 +57,27 @@ export type ProgrammeComparison = {
   retention: number;
 };
 
+export type ProgrammeSummary = {
+  programmesTracked: number;
+  episodesTracked: number;
+  combinedViews: number;
+  likes: number;
+  comments: number;
+  engagementRate: number | null;
+};
+
+export type ProgrammeRankingRow = {
+  rank: number;
+  programmeId: string;
+  programmeTitle: string;
+  channelTitle: string;
+  episodes: number;
+  views: number;
+  likes: number;
+  comments: number;
+  engagementRate: number | null;
+};
+
 export type ChannelOption = {
   id: string;
   label: string;
@@ -107,6 +128,12 @@ export type ChannelPeriodSummary = {
   videoGrowthPercent: number | null;
 };
 
+export type ChannelComparisonSeries = {
+  channelId: string;
+  channelTitle: string;
+  points: TimeSeriesPoint[];
+};
+
 export type DashboardData = {
   filters: DashboardFilters;
   notice?: DashboardNotice;
@@ -117,8 +144,13 @@ export type DashboardData = {
   kpis: KpiMetric[];
   growth: TimeSeriesPoint[];
   channelPeriodSummary: ChannelPeriodSummary | null;
+  channelComparison: ChannelComparisonSeries[];
+  channelComparisonNotices: string[];
+  selectedComparisonChannels: string[];
   newsTrend: TimeSeriesPoint[];
   rankings: RankingRow[];
+  programmeSummary: ProgrammeSummary;
+  programmeRankings: ProgrammeRankingRow[];
   contentRankings: ContentRankingRow[];
   contentSummary: ContentSummary;
   contentFreshness: string | null;

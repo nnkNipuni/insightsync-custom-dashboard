@@ -4,6 +4,11 @@ import { getDashboardData } from "@/lib/analytics/service";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const comparisonChannels = searchParams
+    .get("comparisonChannels")
+    ?.split(",")
+    .map((channelId) => channelId.trim())
+    .filter(Boolean);
 
   try {
     const data = await getDashboardData({
@@ -14,6 +19,7 @@ export async function GET(request: Request) {
       endDate: searchParams.get("endDate") ?? undefined,
     }, {
       activeModule: searchParams.get("activeModule") ?? undefined,
+      comparisonChannels,
     });
 
     return NextResponse.json(data);

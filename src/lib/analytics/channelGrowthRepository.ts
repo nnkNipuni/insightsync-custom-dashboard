@@ -6,7 +6,7 @@ import {
 } from "@google-cloud/bigquery";
 
 import { analyticsConfig } from "./config";
-import type { TimeSeriesPoint } from "./types";
+import type { ChannelComparisonSeries, TimeSeriesPoint } from "./types";
 
 type ChannelGrowthRow = {
   ingestion_date: BigQueryDate | string;
@@ -17,6 +17,10 @@ type ChannelGrowthRow = {
 
 type ChannelAvailabilityRow = {
   earliest_ingestion_date: BigQueryDate | string | null;
+};
+
+type ChannelComparisonRow = ChannelGrowthRow & {
+  channel_id: string;
 };
 
 const bigquery = new BigQuery({
@@ -69,6 +73,55 @@ export async function getChannelEarliestGrowthDate(
   return formatDate(row.earliest_ingestion_date);
 }
 
+export async function getChannelComparisonTrend({
+  channelIds,
+  channelTitles,
+  endDate,
+  startDate,
+}: {
+  channelIds: string[];
+  channelTitles: Map<string, string>;
+  endDate: string;
+  startDate: string;
+}): Promise<ChannelComparisonSeries[]> {
+  if (channelIds.length === 0) {
+    return [];
+  }
+
+  const [rows] = await bigquery.query({
+    query: channelComparisonQuery,
+    params: { channelIds, startDate, endDate },
+    location: analyticsConfig.location,
+  });
+  const seriesByChannel = new Map<string, ChannelComparisonSeries>();
+
+  channelIds.forEach((channelId) => {
+    seriesByChannel.set(channelId, {
+      channelId,
+      channelTitle: channelTitles.get(channelId) ?? channelId,
+      points: [],
+    });
+  });
+
+  (rows as ChannelComparisonRow[]).forEach((row) => {
+    const channelId = row.channel_id;
+    const series = seriesByChannel.get(channelId);
+
+    if (!series) {
+      return;
+    }
+
+    series.points.push({
+      date: formatDate(row.ingestion_date),
+      subscribers: toNumber(row.subscriber_count),
+      views: toNumber(row.view_count),
+      videos: toNumber(row.video_count),
+    });
+  });
+
+  return [...seriesByChannel.values()];
+}
+
 const allChannelsTrendQuery = `
   SELECT
     ingestion_date,
@@ -100,6 +153,20 @@ const channelAvailabilityQuery = `
     MIN(ingestion_date) AS earliest_ingestion_date
   FROM \`${analyticsConfig.projectId}.${analyticsConfig.youtubeRawDataset}.${analyticsConfig.channelDailyGrowthView}\`
   WHERE channel_id = @channelId
+`;
+
+const channelComparisonQuery = `
+  SELECT
+    channel_id,
+    ingestion_date,
+    subscriber_count,
+    view_count,
+    video_count
+  FROM \`${analyticsConfig.projectId}.${analyticsConfig.youtubeRawDataset}.${analyticsConfig.channelDailyGrowthView}\`
+  WHERE channel_id IN UNNEST(@channelIds)
+    AND ingestion_date >= DATE(@startDate)
+    AND ingestion_date <= DATE(@endDate)
+  ORDER BY channel_id, ingestion_date
 `;
 
 function toNumber(value: number | string | null): number {

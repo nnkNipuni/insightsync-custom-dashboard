@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  getChannelComparisonTrend,
   getChannelEarliestGrowthDate,
   getChannelGrowthTrend,
 } from "./channelGrowthRepository";
@@ -15,9 +16,15 @@ import {
   getContentRankings,
   getContentSummary,
 } from "./contentRepository";
+import {
+  getProgrammeOptions,
+  getProgrammeRankings,
+  getProgrammeSummary,
+} from "./programmeRepository";
 import type {
   ChannelPeriodSummary,
   ChannelOption,
+  ChannelComparisonSeries,
   DashboardData,
   DashboardFilters,
   DashboardNotice,
@@ -31,15 +38,11 @@ import type {
   TimeSeriesPoint,
 } from "./types";
 
-type DashboardModule = "overview" | "youtube-channel" | "youtube-content";
-
-const programmes: SelectOption[] = [
-  { id: "all", label: "All programmes" },
-  { id: "9pm-drama", label: "9pm Drama" },
-  { id: "main-news", label: "Main News Bulletin" },
-  { id: "ts03", label: "Drama TS03" },
-  { id: "little-star", label: "Little Star S13" },
-];
+type DashboardModule =
+  | "overview"
+  | "youtube-channel"
+  | "youtube-content"
+  | "youtube-programmes";
 
 const campaigns: SelectOption[] = [
   { id: "all", label: "All campaigns" },
@@ -420,19 +423,59 @@ function getPercentChange(startValue: number, endValue: number): number | null {
   return ((endValue - startValue) / startValue) * 100;
 }
 
+function normalizeComparisonChannels(
+  requestedChannels: string[] | undefined,
+  records: ChannelLatestRecord[],
+): string[] {
+  const validChannelIds = new Set(records.map((record) => record.channelId));
+  const requestedValidChannels = (requestedChannels ?? [])
+    .filter((channelId) => validChannelIds.has(channelId))
+    .filter((channelId, index, list) => list.indexOf(channelId) === index)
+    .slice(0, 5);
+
+  if (requestedValidChannels.length >= 2) {
+    return requestedValidChannels;
+  }
+
+  return records.slice(0, 2).map((record) => record.channelId);
+}
+
+function getChannelComparisonNotices(
+  series: ChannelComparisonSeries[],
+): string[] {
+  return series
+    .filter((channel) => channel.points.length === 0)
+    .map(
+      (channel) =>
+        `${channel.channelTitle} has no comparison snapshots in the selected date range.`,
+    );
+}
+
 export async function getDashboardData(
   requestedFilters?: Partial<DashboardFilters>,
   options?: {
     activeModule?: string;
+    comparisonChannels?: string[];
   },
 ): Promise<DashboardData> {
   const activeModule = normalizeActiveModule(options?.activeModule);
   const filters = normalizeFilters(requestedFilters);
-  const [channelLatestRecords, contentChannels] = await Promise.all([
+  const [channelLatestRecords, contentChannels, programmeOptions] = await Promise.all([
     getChannelLatestRecords(),
     getContentChannels(),
+    getProgrammeOptions(),
   ]);
   const realChannels = getChannelOptions(channelLatestRecords);
+  const comparisonChannelIds = normalizeComparisonChannels(
+    options?.comparisonChannels,
+    channelLatestRecords,
+  );
+  const channelTitles = new Map(
+    channelLatestRecords.map((record) => [
+      record.channelId,
+      record.channelTitle,
+    ]),
+  );
   const selectedChannel = selectChannelRecord(
     channelLatestRecords,
     filters.channel,
@@ -489,9 +532,23 @@ export async function getDashboardData(
     }
   }
 
-  const [growth, contentRankings, contentSummary, contentFreshness] = await Promise.all([
+  const [
+    growth,
+    channelComparison,
+    contentRankings,
+    contentSummary,
+    contentFreshness,
+    programmeSummary,
+    programmeRankings,
+  ] = await Promise.all([
     getChannelGrowthTrend({
       channelId: resolvedFilters.channel,
+      startDate: resolvedFilters.startDate,
+      endDate: resolvedFilters.endDate,
+    }),
+    getChannelComparisonTrend({
+      channelIds: comparisonChannelIds,
+      channelTitles,
       startDate: resolvedFilters.startDate,
       endDate: resolvedFilters.endDate,
     }),
@@ -506,6 +563,18 @@ export async function getDashboardData(
       endDate: resolvedFilters.endDate,
     }),
     getContentFreshness(),
+    getProgrammeSummary({
+      channelId: resolvedFilters.channel,
+      programmeId: resolvedFilters.programme,
+      startDate: resolvedFilters.startDate,
+      endDate: resolvedFilters.endDate,
+    }),
+    getProgrammeRankings({
+      channelId: resolvedFilters.channel,
+      programmeId: resolvedFilters.programme,
+      startDate: resolvedFilters.startDate,
+      endDate: resolvedFilters.endDate,
+    }),
   ]);
 
   return {
@@ -513,7 +582,7 @@ export async function getDashboardData(
     notice,
     channels: realChannels,
     contentChannels,
-    programmes,
+    programmes: programmeOptions,
     campaigns,
     kpis: getChannelLatestKpis(selectedChannel),
     growth,
@@ -521,8 +590,13 @@ export async function getDashboardData(
       channel: selectedChannel,
       points: growth,
     }),
+    channelComparison,
+    channelComparisonNotices: getChannelComparisonNotices(channelComparison),
+    selectedComparisonChannels: comparisonChannelIds,
     newsTrend,
     rankings,
+    programmeSummary,
+    programmeRankings,
     contentRankings,
     contentSummary,
     contentFreshness,
@@ -538,7 +612,11 @@ export async function getDashboardData(
 }
 
 function normalizeActiveModule(module?: string): DashboardModule {
-  if (module === "youtube-channel" || module === "youtube-content") {
+  if (
+    module === "youtube-channel" ||
+    module === "youtube-content" ||
+    module === "youtube-programmes"
+  ) {
     return module;
   }
 
