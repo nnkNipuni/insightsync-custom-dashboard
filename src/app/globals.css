@@ -33,3 +33,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media print {
+  aside,
+  [data-export-exclude],
+  [data-export-hover] {
+    display: none !important;
+  }
+
+  main,
+  section {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  article {
+    break-inside: avoid;
+  }
+}

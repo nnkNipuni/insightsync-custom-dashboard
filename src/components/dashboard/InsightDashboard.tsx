@@ -9,6 +9,7 @@ import {
   useState,
   useTransition,
   type MouseEvent,
+  type RefObject,
   type ReactNode,
 } from "react";
 
@@ -65,6 +66,11 @@ type DropdownPosition = {
   width: number;
 };
 
+type ExportMenuOption = {
+  label: string;
+  onSelect: () => void | Promise<void>;
+};
+
 const trendMetricOptions: {
   id: TrendMetric;
   label: string;
@@ -79,7 +85,7 @@ const snapshotGrowthMetricOptions: {
   label: string;
 }[] = [
   { id: "viewsGained", label: "Views Gained" },
-  { id: "subscribersGained", label: "Subscribers Gained" },
+  { id: "subscribersGained", label: "Subscriber Count Change" },
   { id: "uploadsAdded", label: "Uploads Added" },
 ];
 
@@ -983,20 +989,155 @@ function YoutubeChannelView({
     useState<SnapshotGrowthMetric>("viewsGained");
   const [comparisonMetric, setComparisonMetric] =
     useState<TrendMetric>("views");
+  const cumulativeChartRef = useRef<HTMLElement>(null);
+  const snapshotGrowthChartRef = useRef<HTMLElement>(null);
+  const comparisonChartRef = useRef<HTMLElement>(null);
+  const selectedChannel = data.channels.find(
+    (channel) => channel.id === data.filters.channel,
+  );
+  const channelLabel = selectedChannel?.label ?? data.filters.channel;
+  const dateRangeLabel = `${data.filters.startDate}-to-${data.filters.endDate}`;
+  const channelFilenamePart =
+    data.filters.channel === "all" ? "all-channels" : channelLabel;
+  const cumulativeMetricLabel = getTrendMetricLabel(trendMetric);
+  const snapshotGrowthMetricLabel =
+    getSnapshotGrowthMetricLabel(snapshotGrowthMetric);
+  const comparisonMetricLabel = getTrendMetricLabel(comparisonMetric);
+
+  function downloadChannelPdf() {
+    window.print();
+  }
+
+  function downloadCumulativeCsv() {
+    downloadCsv(
+      [
+        ["channel_id", "channel_title", "ingestion_date", cumulativeMetricLabel],
+        ...data.growth.map((point) => [
+          data.filters.channel,
+          channelLabel,
+          point.date,
+          point[trendMetric],
+        ]),
+      ],
+      getExportFilename(
+        "channel-cumulative-metrics",
+        dateRangeLabel,
+        channelFilenamePart,
+        cumulativeMetricLabel,
+        "csv",
+      ),
+    );
+  }
+
+  function downloadSnapshotGrowthCsv() {
+    downloadCsv(
+      [
+        [
+          "ingestion_date",
+          "previous_snapshot_date",
+          "interval_days",
+          snapshotGrowthMetricLabel,
+        ],
+        ...data.snapshotGrowth.map((point) => [
+          point.date,
+          point.previousSnapshotDate ?? "",
+          point.intervalDays ?? "",
+          point[snapshotGrowthMetric],
+        ]),
+      ],
+      getExportFilename(
+        "channel-growth-between-snapshots",
+        dateRangeLabel,
+        channelFilenamePart,
+        snapshotGrowthMetricLabel,
+        "csv",
+      ),
+    );
+  }
+
+  function downloadComparisonCsv() {
+    downloadCsv(
+      [
+        ["ingestion_date", "channel_id", "channel_title", comparisonMetricLabel],
+        ...data.channelComparison.flatMap((series) =>
+          series.points.map((point) => [
+            point.date,
+            series.channelId,
+            series.channelTitle,
+            point[comparisonMetric],
+          ]),
+        ),
+      ],
+      getExportFilename(
+        "channel-comparison",
+        dateRangeLabel,
+        "selected-channels",
+        comparisonMetricLabel,
+        "csv",
+      ),
+    );
+  }
+
+  function downloadChartPng(
+    elementRef: RefObject<HTMLElement | null>,
+    filenamePrefix: string,
+    metricLabel: string,
+    channelPart = channelFilenamePart,
+  ) {
+    void downloadElementPng(
+      elementRef.current,
+      getExportFilename(
+        filenamePrefix,
+        dateRangeLabel,
+        channelPart,
+        metricLabel,
+        "png",
+      ),
+    );
+  }
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-5" data-channel-export-page>
+      <div className="flex justify-end" data-export-exclude>
+        <button
+          className="h-9 rounded-md border border-[var(--color-border)] bg-white px-3 text-sm font-semibold text-[var(--color-brand-dark)] shadow-sm transition hover:bg-[var(--color-brand-soft)]"
+          onClick={downloadChannelPdf}
+          type="button"
+        >
+          Save PDF
+        </button>
+      </div>
       <KpiGrid metrics={data.kpis} />
       <section className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
         <Panel
+          panelRef={cumulativeChartRef}
           title="Cumulative Channel Metrics Trend"
           description="Shows how the selected channel's cumulative views, subscribers, or video count change over time based on available snapshots."
           action={
-            <SegmentedControl
-              onChange={setTrendMetric}
-              options={trendMetricOptions}
-              value={trendMetric}
-            />
+            <div className="flex items-center gap-2" data-export-exclude>
+              <SegmentedControl
+                onChange={setTrendMetric}
+                options={trendMetricOptions}
+                value={trendMetric}
+              />
+              <ChartExportMenu
+                options={[
+                  {
+                    label: "Download PNG",
+                    onSelect: () =>
+                      downloadChartPng(
+                        cumulativeChartRef,
+                        "channel-cumulative-metrics",
+                        cumulativeMetricLabel,
+                      ),
+                  },
+                  {
+                    label: "Download CSV",
+                    onSelect: downloadCumulativeCsv,
+                  },
+                ]}
+              />
+            </div>
           }
         >
           <LineChart metric={trendMetric} points={data.growth} />
@@ -1006,32 +1147,81 @@ function YoutubeChannelView({
         </Panel>
       </section>
       <Panel
+        panelRef={snapshotGrowthChartRef}
         title="Growth Between Available Snapshots"
         description="Shows the change in channel views, subscribers, or uploaded video count between consecutive available snapshots. If a snapshot is missing, the value covers the full interval since the previous available snapshot."
         actionLayout="wide"
         action={
-          <SegmentedControl
-            preventLabelWrap
-            onChange={setSnapshotGrowthMetric}
-            options={snapshotGrowthMetricOptions}
-            value={snapshotGrowthMetric}
-          />
+          <div className="flex items-center gap-2" data-export-exclude>
+            <SegmentedControl
+              preventLabelWrap
+              onChange={setSnapshotGrowthMetric}
+              options={snapshotGrowthMetricOptions}
+              value={snapshotGrowthMetric}
+            />
+            <ChartExportMenu
+              options={[
+                {
+                  label: "Download PNG",
+                  onSelect: () =>
+                    downloadChartPng(
+                      snapshotGrowthChartRef,
+                      "channel-growth-between-snapshots",
+                      snapshotGrowthMetricLabel,
+                    ),
+                },
+                {
+                  label: "Download CSV",
+                  onSelect: downloadSnapshotGrowthCsv,
+                },
+              ]}
+            />
+          </div>
         }
       >
+        {snapshotGrowthMetric === "subscribersGained" && (
+          <p className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-brand-soft)]/40 px-3 py-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+            Note: YouTube reports public subscriber counts as rounded values.
+            Changes may therefore appear in fixed increments such as 1,000 and
+            do not represent the exact number of subscribers gained on that
+            date.
+          </p>
+        )}
         <SnapshotGrowthBarChart
           metric={snapshotGrowthMetric}
           points={data.snapshotGrowth}
         />
       </Panel>
       <Panel
+        panelRef={comparisonChartRef}
         title="Channel Comparison"
         description="Compare cumulative channel metrics across selected YouTube channels over the chosen date range."
         action={
-          <SegmentedControl
-            onChange={setComparisonMetric}
-            options={trendMetricOptions}
-            value={comparisonMetric}
-          />
+          <div className="flex items-center gap-2" data-export-exclude>
+            <SegmentedControl
+              onChange={setComparisonMetric}
+              options={trendMetricOptions}
+              value={comparisonMetric}
+            />
+            <ChartExportMenu
+              options={[
+                {
+                  label: "Download PNG",
+                  onSelect: () =>
+                    downloadChartPng(
+                      comparisonChartRef,
+                      "channel-comparison",
+                      comparisonMetricLabel,
+                      "selected-channels",
+                    ),
+                },
+                {
+                  label: "Download CSV",
+                  onSelect: downloadComparisonCsv,
+                },
+              ]}
+            />
+          </div>
         }
       >
         <div className="grid gap-4">
@@ -1499,18 +1689,23 @@ function Panel({
   actionLayout = "default",
   children,
   description,
+  panelRef,
   title,
 }: {
   action?: ReactNode;
   actionLayout?: "default" | "wide";
   children: ReactNode;
   description?: string;
+  panelRef?: RefObject<HTMLElement | null>;
   title: string;
 }) {
   const isWideAction = actionLayout === "wide";
 
   return (
-    <article className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-5 shadow-sm">
+    <article
+      ref={panelRef}
+      className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-5 shadow-sm"
+    >
       <div
         className={[
           "mb-5 flex flex-col gap-3",
@@ -1578,6 +1773,71 @@ function SegmentedControl<T extends string>({
           {option.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function ChartExportMenu({ options }: { options: ExportMenuOption[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, []);
+
+  function selectOption(option: ExportMenuOption) {
+    setIsOpen(false);
+    void option.onSelect();
+  }
+
+  return (
+    <div ref={menuRef} className="relative" data-export-exclude>
+      <button
+        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] bg-white text-[var(--color-brand-dark)] shadow-sm transition hover:bg-[var(--color-brand-soft)]"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+        aria-expanded={isOpen}
+        aria-label="Download chart"
+        title="Download chart"
+      >
+        <svg
+          aria-hidden="true"
+          className="h-4 w-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="m7 10 5 5 5-5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 21h14" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div className="absolute right-0 z-30 mt-2 w-40 rounded-md border border-[var(--color-border)] bg-white p-1 shadow-lg">
+          {options.map((option) => (
+            <button
+              key={option.label}
+              className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-[var(--color-text-secondary)] transition hover:bg-[var(--color-brand-soft)] hover:text-[var(--color-brand-dark)]"
+              onClick={() => selectOption(option)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1970,7 +2230,7 @@ function ChannelComparisonChart({
             </g>
           ))}
           {hoveredDatePoint && (
-            <g pointerEvents="none">
+            <g pointerEvents="none" data-export-hover>
               <line
                 x1={hoveredDatePoint.x}
                 x2={hoveredDatePoint.x}
@@ -2247,6 +2507,135 @@ function getNearestPointIndex<T extends { x: number }>(
   }, 0);
 }
 
+function downloadCsv(rows: (string | number | null)[][], filename: string) {
+  const csv = rows.map((row) => row.map(formatCsvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  downloadBlob(blob, filename);
+}
+
+function formatCsvCell(value: string | number | null): string {
+  const text = value === null ? "" : String(value);
+
+  if (!/[",\n\r]/.test(text)) {
+    return text;
+  }
+
+  return `"${text.replaceAll("\"", "\"\"")}"`;
+}
+
+async function downloadElementPng(
+  element: HTMLElement | null,
+  filename: string,
+) {
+  if (!element) {
+    return;
+  }
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone
+    .querySelectorAll("[data-export-exclude], [data-export-hover]")
+    .forEach((excludedElement) => excludedElement.remove());
+  inlineComputedStyles(element, clone);
+
+  const width = Math.ceil(element.scrollWidth);
+  const height = Math.ceil(element.scrollHeight);
+  const serializedHtml = new XMLSerializer().serializeToString(clone);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <foreignObject width="100%" height="100%">
+        <div xmlns="http://www.w3.org/1999/xhtml">${serializedHtml}</div>
+      </foreignObject>
+    </svg>
+  `;
+  const image = await loadImage(
+    `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+  );
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return;
+  }
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.scale(scale, scale);
+  context.drawImage(image, 0, 0, width, height);
+
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      return;
+    }
+
+    downloadBlob(blob, filename);
+  }, "image/png");
+}
+
+function inlineComputedStyles(source: Element, target: Element) {
+  if (source instanceof HTMLElement || source instanceof SVGElement) {
+    const computedStyle = window.getComputedStyle(source);
+    const targetElement = target as HTMLElement | SVGElement;
+
+    for (const property of computedStyle) {
+      targetElement.style.setProperty(
+        property,
+        computedStyle.getPropertyValue(property),
+        computedStyle.getPropertyPriority(property),
+      );
+    }
+  }
+
+  Array.from(source.children).forEach((sourceChild, index) => {
+    const targetChild = target.children.item(index);
+
+    if (targetChild) {
+      inlineComputedStyles(sourceChild, targetChild);
+    }
+  });
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = document.createElement("img");
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getExportFilename(
+  prefix: string,
+  dateRange: string,
+  subject: string,
+  metric: string,
+  extension: "csv" | "png",
+): string {
+  return `${sanitizeFilename(prefix)}-${sanitizeFilename(subject)}-${sanitizeFilename(metric)}-${sanitizeFilename(dateRange)}.${extension}`;
+}
+
+function sanitizeFilename(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
 function getSvgCoordinateX(
   clientX: number,
   clientY: number,
@@ -2510,7 +2899,7 @@ function LineChart({
           vectorEffect="non-scaling-stroke"
         />
         {hoveredPoint && (
-          <g pointerEvents="none">
+          <g pointerEvents="none" data-export-hover>
             <line
               x1={hoveredPoint.x}
               x2={hoveredPoint.x}
@@ -2745,7 +3134,7 @@ function SnapshotGrowthBarChart({
           );
         })}
         {hoveredPoint && (
-          <g pointerEvents="none">
+          <g pointerEvents="none" data-export-hover>
             <line
               x1={hoveredPoint.x}
               x2={hoveredPoint.x}
@@ -2816,7 +3205,7 @@ function getTrendMetricLabel(metric: TrendMetric): string {
 
 function getSnapshotGrowthMetricLabel(metric: SnapshotGrowthMetric): string {
   if (metric === "subscribersGained") {
-    return "Subscribers Gained";
+    return "Subscriber Count Change";
   }
 
   if (metric === "uploadsAdded") {
